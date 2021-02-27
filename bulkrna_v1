@@ -21,6 +21,9 @@ metadat <- fread('/labs/khatrilab/scottmk/aapfizer/csvs/RNAseq_manifest_V2.csv')
 colnames(metadat)[1] <- "pt_id" 
 metadat_care <- metadat[,1:6]
 
+# true baseline, 2047, 2049 and 2051
+# plus 
+
 ### ensembl convert
 # library('biomaRt')
 # mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
@@ -59,8 +62,8 @@ pheno_mat$day <- sapply(strsplit(as.character(pheno_mat$fullid), "[_]"), "[", 2)
 pheno_mat <- pheno_mat[-1,]
 table(pheno_mat$day)
 pheno_mat$day_agg <- ifelse(pheno_mat$day == "Day22", "Day22.23", pheno_mat$day)
-pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day2", "Day1.2", pheno_mat$day_agg)
-pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1", "Day1.2", pheno_mat$day_agg)
+#pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day2", "Day1.2", pheno_mat$day_agg)
+#pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1", "Day1.2", pheno_mat$day_agg)
 
 metadat_care$pt_id <- as.character(metadat_care$pt_id)
 pheno_mat <- pheno_mat %>%
@@ -71,7 +74,7 @@ pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1.2" & pheno_mat$Day == "Da
 table(pheno_mat$day_agg)
 
 #saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/dat_mat_v2.RDS", dat_mat)
-#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pheno_v2.RDS", pheno_mat)
+saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pheno_v3.RDS", pheno_mat)
 
 #########################
 dat_mat$hgnc_symbol <- NULL
@@ -150,3 +153,5 @@ all_comps <- lapply(comparison_list, function(x)
   DeSeqComparisons(x, rounded_counts = SOURCE_EXPR, pheno = pheno_mat))
 
 all_comps_df <- rbindlist(all_comps)
+#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq_vsBaseline_v2.rds", all_comps_df)
+
