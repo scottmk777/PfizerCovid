@@ -1,0 +1,132 @@
+rm(list=ls())
+library(tximport)
+library(ggplot2)
+library(magrittr)
+library(biomaRt)
+library(edgeR)
+library(parallel)
+library(data.table)
+library(DESeq2)
+point_size = 5
+
+# reat in
+dat_mat <- fread('/labs/khatrilab/scottmk/aapfizer/csvs/p21017_RawCount.txt')
+
+### ensembl convert
+library('biomaRt')
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+genes <- dat_mat$ENSEMBLID
+gene_IDs <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"),
+                  values = genes, mart= mart)
+
+saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/gene_IDs_ensembl_convert.rds", gene_IDs)
+
+# merge up 
+colnames(dat_mat)[1] <- "ensembl_gene_id"
+dat_mat <- gene_IDs %>%
+  left_join(dat_mat)
+
+# fix some columns
+dat_mat$hgnc_symbol <- make.unique(dat_mat$hgnc_symbol)
+dat_mat$ensembl_gene_id <- NULL
+dat_mat <- as.data.frame(dat_mat)
+rownames(dat_mat) <- dat_mat$hgnc_symbol
+
+# drop out useless garb
+na_inds <- grep("^NA", dat_mat$hgnc_symbol)
+dat_mat <- dat_mat[-na_inds,]
+remove_inds <- grep("^[.]|^OR|LINC|^MTN|^RPL|^RPS|^MTC|^MT-", dat_mat$hgnc_symbol)
+remove_inds_df <- data.frame(torem = dat_mat$hgnc_symbol[remove_inds])
+dat_mat <- dat_mat[-remove_inds,]
+
+### assemble pheno
+pheno_mat <- data.frame(fullid = as.character(colnames(dat_mat)))
+pheno_mat <- pheno_mat[-1,]
+pheno_mat$fullid <- as.character(pheno_mat$fullid)
+pheno_mat$pt_id <- sapply(strsplit(as.character(pheno_mat$fullid), "[_]"), "[", 1)
+pheno_mat$pt_id <- gsub("PID", "", pheno_mat$pt_id)
+pheno_mat$day <- sapply(strsplit(as.character(pheno_mat$fullid), "[_]"), "[", 2)
+table(pheno_mat$day)
+pheno_mat$day_agg <- ifelse(pheno_mat$day == "Day22", "Day22.23", pheno_mat$day)
+pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day2", "Day1.2", pheno_mat$day_agg)
+pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1", "Day1.2", pheno_mat$day_agg)
+
+
+saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/dat_mat_v1.RDS", dat_mat)
+saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pheno_v1.RDS", pheno_mat)
+
+#########################
+library(DESeq2)
+dat_mat$hgnc_symbol <- NULL
+table(pheno_mat$day_agg)
+rounded_counts_expr <- dat_mat
+
+comparison_list <- list(c("BL", "Day1.2"),
+                        c("BL", "Day7"),
+                        c("BL", "Day21"),
+                        c("BL", "Day22.23"),
+                        c("BL", "Day28"))
+
+comparison = comparison_list[[1]]
+rounded_counts = rounded_counts_expr
+
+DeSeqComparisons <- function(comparison, dds = dds, rounded_counts, pheno = pheno_mat){
+  cases = comparison[2]
+  controls = comparison[1]
+  ind_interest <- which(dds[["day_agg"]] %in% c(cases,controls))
+  ind_case <- which(dds[["day_agg"]] %in% c(cases))
+  ind_control <- which(dds[["day_agg"]] %in% c(controls))
+  
+  dds_sub <- DESeqDataSetFromMatrix(countData = rounded_counts[,ind_interest],
+                                    colData = pheno[ind_interest,],
+                                    design = ~ day_agg)
+  
+  
+  dds_results <- DESeq(dds_sub)
+  #resultsNames(dds_wk0_wk80_results)
+  rezzy <- results(dds_results)
+  rezzy_2 <- as.data.frame(rezzy@listData)
+  rezzy_2$gene <- rezzy@rownames
+  rezzy_2$comparsion <- paste0(controls, "_vs_", cases)
+  return(rezzy_2)
+}
+
+
+FOLD_CHNG_THRESH = .5
+P_VAL_THRESH = 0.05
+SOURCE_EXPR = rounded_counts_expr
+source_name = "pfizer_rna"
+
+
+dds <- DESeqDataSetFromMatrix(countData = rounded_counts_expr,
+                              colData = pheno_mat,
+                              design = ~ day_agg)
+
+all_comps <- lapply(comparison_list, function(x) 
+  DeSeqComparisons(x, dds = dds, rounded_counts = SOURCE_EXPR, 
+                                                                  pheno = pheno_mat))
+all_comps_df <- rbindlist(all_comps)
+saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq.rds", all_comps_df)
+
+#
+all_comps_dfd2 <- all_comps_df[grep("Day1", all_comps_df$comparsion),]
+### set up for some overtime plotting
+keygenes <- c("IFI27", "CXCL10")
+phenoplot <- pheno_mat
+
+dds <- estimateSizeFactors(dds)
+normcounts <- counts(dds, normalized=TRUE)
+
+for(gene in keygenes){
+  #phenoplot[[gene]] <- as.numeric(dat_mat[gene,])
+  phenoplot[[gene]] <- as.numeric(normcounts[gene,])
+  
+}
+
+phenoplot$day_agg_fact <- factor(phenoplot$day_agg, levels = c("BL", "Day1.2",
+                                                               "Day7", "Day21",
+                                                               "Day22.23", "Day28"))
+ggplot(phenoplot, aes(x = day_agg_fact, y = log(CXCL10))) + geom_point() + 
+  stat_summary(fun = median, geom="line",lwd=1,aes(group=1)) + theme_cowplot()
+  
+  
