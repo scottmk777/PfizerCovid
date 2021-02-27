@@ -7,6 +7,12 @@ library(edgeR)
 library(parallel)
 library(data.table)
 library(DESeq2)
+library(BiocParallel)
+library(dplyr)
+library(cowplot)
+library(xlsx)
+
+register(MulticoreParam(16))
 point_size = 5
 
 # reat in
@@ -15,19 +21,15 @@ metadat <- fread('/labs/khatrilab/scottmk/aapfizer/csvs/RNAseq_manifest_V2.csv')
 colnames(metadat)[1] <- "pt_id" 
 metadat_care <- metadat[,1:6]
 
-###
-# All participants after 2043, and two participants (2027 and 2031)  have day 0, 2, 7, 21, 22 and 28 time points (edited) 
-# 6:05
-# The other participants have day 0, 1, 7, 21, 22 and 28.
-
 ### ensembl convert
-library('biomaRt')
-mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
-genes <- dat_mat$ENSEMBLID
-gene_IDs <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"),
-                  values = genes, mart= mart)
-
-saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/gene_IDs_ensembl_convert.rds", gene_IDs)
+# library('biomaRt')
+# mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+# genes <- dat_mat$ENSEMBLID
+# gene_IDs <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"),
+#                   values = genes, mart= mart)
+# 
+# saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/gene_IDs_ensembl_convert.rds", gene_IDs)
+gene_IDs <- readRDS("/labs/khatrilab/scottmk/aapfizer/data/gene_IDs_ensembl_convert.rds")
 
 # merge up 
 colnames(dat_mat)[1] <- "ensembl_gene_id"
@@ -68,11 +70,10 @@ pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1.2" & pheno_mat$Day == "Da
 pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1.2" & pheno_mat$Day == "Day2", "Day2", pheno_mat$day_agg)
 table(pheno_mat$day_agg)
 
-saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/dat_mat_v1.RDS", dat_mat)
-saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pheno_v2.RDS", pheno_mat)
+#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/dat_mat_v2.RDS", dat_mat)
+#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pheno_v2.RDS", pheno_mat)
 
 #########################
-library(DESeq2)
 dat_mat$hgnc_symbol <- NULL
 
 # drop those low counters
@@ -87,29 +88,36 @@ dat_mat <- dat_mat[-low_ind,]
 table(pheno_mat$day_agg)
 rounded_counts_expr <- dat_mat
 rounded_counts = rounded_counts_expr
-pheno_mat$pt_id_fact <- factor(pheno_mat$pt_id)
+pheno_mat$pt_id_fact <- factor(paste0("PID",pheno_mat$pt_id))
+unique(pheno_mat$pt_id_fact)
 
 DeSeqComparisons <- function(comparison,rounded_counts, pheno = pheno_mat){
   cases = comparison[2]
   controls = comparison[1]
-  
+  print(paste0("cases: ", cases, " controls: ", controls))
   # subset down to only matched pairs
   # control will always have all pts so only need to worry about cases
   pheno_case <- pheno[which(pheno$day_agg %in% cases ),]
   pheno <- pheno[which(pheno$pt_id %in% pheno_case$pt_id),]
   
+  # for reference
   ind_interest <- which(pheno[["day_agg"]] %in% c(cases,controls))
   ind_case <- which(pheno[["day_agg"]] %in% c(cases))
   ind_control <- which(pheno[["day_agg"]] %in% c(controls))
   
-  dds_sub <- DESeqDataSetFromMatrix(countData = rounded_counts[,ind_interest],
-                                    colData = pheno[ind_interest,],
-                                    design = ~ day_agg + pt_id_fact)
+  # subset
+  pheno_cur <- pheno[which(pheno[["day_agg"]] %in% c(cases,controls)),]
+  print(table(pheno_cur$day_agg))
+  countData <- rounded_counts[,pheno_cur$fullid]
   
-  #
-  dds_results <- DESeq(dds_sub)
+  dds_sub <- DESeqDataSetFromMatrix(countData = countData,
+                                    colData = pheno_cur,
+                                    design = ~ day_agg + pt_id_fact) #
   
-  #resultsNames(dds_results, )
+  
+  dds_results <- DESeq(dds_sub, parallel = T)
+  
+  #resultsNames(dds_results)
   resname <- paste0("day_agg_", cases, "_vs_", controls)
   rezzy <- results(dds_results, name = resname)
   rezzy_2 <- as.data.frame(rezzy@listData)
@@ -136,63 +144,9 @@ comparison_list_21 <- list(c("Day21", "Day1.2"),
                            c("Day21", "Day22.23"),
                            c("Day21", "Day28"))
 
-comparison = comparison_list[[1]]
+comparison = comparison_list[[5]]
 
 all_comps <- lapply(comparison_list, function(x) 
   DeSeqComparisons(x, rounded_counts = SOURCE_EXPR, pheno = pheno_mat))
 
 all_comps_df <- rbindlist(all_comps)
-saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq_vsBaseline_paired.rds", all_comps_df)
-#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq_vsD21.rds", all_comps_df)
-
-all_comps_df_sig <- all_comps_df[which(all_comps_df$padj < 0.05),]
-table(all_comps_df_sig$comparsion)
-
-all_comps_df_sig_barely <- all_comps_df[which(all_comps_df$pvalue < 0.05),]
-
-#
-all_comps_dfd2 <- all_comps_df[grep("Day1", all_comps_df$comparsion),]
-### set up for some overtime plotting
-keygenes <- c("IFI27", "CXCL10", "GBP6", "ATF3", "IFI44L", "GBP1")
-phenoplot <- pheno_mat
-
-dds <- estimateSizeFactors(dds)
-normcounts <- counts(dds, normalized=TRUE)
-
-# varianceStabilizingTransformation
-dds.countnorm=varianceStabilizingTransformation(dds,blind=T)
-mat=assay(dds.countnorm)
-
-for(gene in keygenes){
-  #phenoplot[[gene]] <- as.numeric(dat_mat[gene,])
-  phenoplot[[gene]] <- as.numeric(normcounts[gene,])
-  
-}
-
-phenoplot$day_agg_fact <- factor(phenoplot$day_agg, levels = c("BL", "Day1.2",
-                                                               "Day7", "Day21",
-                                                               "Day22.23", "Day28"))
-
-# this looks kinda whack
-cxcl10 <- ggplot(phenoplot, aes(x = day_agg_fact, y = log2(CXCL10))) + geom_point() + 
-  stat_summary(fun = mean, geom="line",lwd=1,aes(group=1)) + theme_cowplot() +
-  xlab("") + theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
-  
-gbp1 <- ggplot(phenoplot, aes(x = day_agg_fact, y = log2(GBP1))) + geom_point() + 
-  stat_summary(fun = mean, geom="line",lwd=1,aes(group=1)) + theme_cowplot() +
-  xlab("") + theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
-
-ifi44l <- ggplot(phenoplot, aes(x = day_agg_fact, y = log2(ATF3))) + geom_point() + 
-  stat_summary(fun = mean, geom="line",lwd=1,aes(group=1)) + theme_cowplot() +
-  xlab("") + theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
-
-grid.arrange(cxcl10, gbp1, ifi44l)
-  
-pdf(file = "/labs/khatrilab/scottmk/aapfizer/images/firstround.pdf", height = 10, width = 5)
-grid.arrange(cxcl10, gbp1, ifi44l)
-dev.off()
-
-
-####
-####
-
