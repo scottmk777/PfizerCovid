@@ -128,6 +128,9 @@ for(gene in keygenes){
 phenoplot$day_agg_fact <- factor(phenoplot$day_agg, levels = c("BL", "Day1.2",
                                                                "Day7", "Day21",
                                                                "Day22.23", "Day28"))
+                                                               
+### sanity check plot
+# eh this looks a little whack to me
 ggplot(phenoplot, aes(x = day_agg_fact, y = log(CXCL10))) + geom_point() + 
   stat_summary(fun = median, geom="line",lwd=1,aes(group=1)) + theme_cowplot()
   
