@@ -108,8 +108,10 @@ DeSeqComparisons <- function(comparison,rounded_counts, pheno = pheno_mat){
   
   
   dds_results <- DESeq(dds_sub)
-  #resultsNames(dds_wk0_wk80_results)
-  rezzy <- results(dds_results)
+  
+  #resultsNames(dds_results, )
+  resname <- paste0("day_agg_", cases, "_vs_", controls)
+  rezzy <- results(dds_results, name = resname)
   rezzy_2 <- as.data.frame(rezzy@listData)
   rezzy_2$gene <- rezzy@rownames
   rezzy_2$comparsion <- paste0(controls, "_vs_", cases)
@@ -136,15 +138,11 @@ comparison_list_21 <- list(c("Day21", "Day1.2"),
 
 comparison = comparison_list[[1]]
 
-dds <- DESeqDataSetFromMatrix(countData = rounded_counts_expr,
-                              colData = pheno_mat,
-                              design = ~ day_agg)
-
 all_comps <- lapply(comparison_list, function(x) 
-  DeSeqComparisons(x, dds = dds, rounded_counts = SOURCE_EXPR, 
-                                                                  pheno = pheno_mat))
+  DeSeqComparisons(x, rounded_counts = SOURCE_EXPR, pheno = pheno_mat))
+
 all_comps_df <- rbindlist(all_comps)
-saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq_vsBaseline.rds", all_comps_df)
+saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq_vsBaseline_paired.rds", all_comps_df)
 #saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq_vsD21.rds", all_comps_df)
 
 all_comps_df_sig <- all_comps_df[which(all_comps_df$padj < 0.05),]
