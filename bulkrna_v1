@@ -70,6 +70,7 @@ comparison_list <- list(c("BL", "Day1.2"),
 comparison = comparison_list[[1]]
 rounded_counts = rounded_counts_expr
 
+# I made this function to handle the zillions of comparisons we will likely do
 DeSeqComparisons <- function(comparison, dds = dds, rounded_counts, pheno = pheno_mat){
   cases = comparison[2]
   controls = comparison[1]
@@ -97,11 +98,12 @@ P_VAL_THRESH = 0.05
 SOURCE_EXPR = rounded_counts_expr
 source_name = "pfizer_rna"
 
-
+# make the dds
 dds <- DESeqDataSetFromMatrix(countData = rounded_counts_expr,
                               colData = pheno_mat,
                               design = ~ day_agg)
 
+# run the function on all the comparisons
 all_comps <- lapply(comparison_list, function(x) 
   DeSeqComparisons(x, dds = dds, rounded_counts = SOURCE_EXPR, 
                                                                   pheno = pheno_mat))
