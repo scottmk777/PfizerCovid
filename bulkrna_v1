@@ -87,17 +87,24 @@ dat_mat <- dat_mat[-low_ind,]
 table(pheno_mat$day_agg)
 rounded_counts_expr <- dat_mat
 rounded_counts = rounded_counts_expr
+pheno_mat$pt_id_fact <- factor(pheno_mat$pt_id)
 
-DeSeqComparisons <- function(comparison, dds = dds, rounded_counts, pheno = pheno_mat){
+DeSeqComparisons <- function(comparison,rounded_counts, pheno = pheno_mat){
   cases = comparison[2]
   controls = comparison[1]
-  ind_interest <- which(dds[["day_agg"]] %in% c(cases,controls))
-  ind_case <- which(dds[["day_agg"]] %in% c(cases))
-  ind_control <- which(dds[["day_agg"]] %in% c(controls))
+  
+  # subset down to only matched pairs
+  # control will always have all pts so only need to worry about cases
+  pheno_case <- pheno[which(pheno$day_agg %in% cases ),]
+  pheno <- pheno[which(pheno$pt_id %in% pheno_case$pt_id),]
+  
+  ind_interest <- which(pheno[["day_agg"]] %in% c(cases,controls))
+  ind_case <- which(pheno[["day_agg"]] %in% c(cases))
+  ind_control <- which(pheno[["day_agg"]] %in% c(controls))
   
   dds_sub <- DESeqDataSetFromMatrix(countData = rounded_counts[,ind_interest],
                                     colData = pheno[ind_interest,],
-                                    design = ~ day_agg)
+                                    design = ~ day_agg + pt_id_fact)
   
   
   dds_results <- DESeq(dds_sub)
