@@ -106,7 +106,7 @@ DeSeqComparisons <- function(comparison,rounded_counts, pheno = pheno_mat){
                                     colData = pheno[ind_interest,],
                                     design = ~ day_agg + pt_id_fact)
   
-  
+  #
   dds_results <- DESeq(dds_sub)
   
   #resultsNames(dds_results, )
