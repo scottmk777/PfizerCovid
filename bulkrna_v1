@@ -1,28 +1,7 @@
-rm(list=ls())
-library(tximport)
-library(ggplot2)
-library(magrittr)
-library(biomaRt)
-library(edgeR)
-library(parallel)
-library(data.table)
-library(DESeq2)
-library(BiocParallel)
-library(dplyr)
-library(cowplot)
-library(xlsx)
-
-register(MulticoreParam(16))
-point_size = 5
-
-# reat in
 dat_mat <- fread('/labs/khatrilab/scottmk/aapfizer/csvs/p21017_RawCount.txt')
 metadat <- fread('/labs/khatrilab/scottmk/aapfizer/csvs/RNAseq_manifest_V2.csv')
 colnames(metadat)[1] <- "pt_id" 
 metadat_care <- metadat[,1:6]
-
-# true baseline, 2047, 2049 and 2051
-# plus 
 
 ### ensembl convert
 # library('biomaRt')
@@ -73,8 +52,8 @@ pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1.2" & pheno_mat$Day == "Da
 pheno_mat$day_agg <- ifelse(pheno_mat$day_agg == "Day1.2" & pheno_mat$Day == "Day2", "Day2", pheno_mat$day_agg)
 table(pheno_mat$day_agg)
 
-#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/dat_mat_v2.RDS", dat_mat)
-saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pheno_v3.RDS", pheno_mat)
+#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/dat_mat_v3.RDS", dat_mat)
+#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pheno_v3.RDS", pheno_mat)
 
 #########################
 dat_mat$hgnc_symbol <- NULL
@@ -93,6 +72,12 @@ rounded_counts_expr <- dat_mat
 rounded_counts = rounded_counts_expr
 pheno_mat$pt_id_fact <- factor(paste0("PID",pheno_mat$pt_id))
 unique(pheno_mat$pt_id_fact)
+### drop d21 2055, 2050, 2012
+pheno_mat <- pheno_mat[-which(pheno_mat$pt_id %in% c("2055", "2050", "2012") &
+                                pheno_mat$day_agg == "Day21"),]
+rounded_counts <- rounded_counts[,pheno_mat$fullid]
+
+dim(pheno_mat)
 
 DeSeqComparisons <- function(comparison,rounded_counts, pheno = pheno_mat){
   cases = comparison[2]
@@ -101,31 +86,32 @@ DeSeqComparisons <- function(comparison,rounded_counts, pheno = pheno_mat){
   # subset down to only matched pairs
   # control will always have all pts so only need to worry about cases
   pheno_case <- pheno[which(pheno$day_agg %in% cases ),]
-  pheno <- pheno[which(pheno$pt_id %in% pheno_case$pt_id),]
-  
-  # for reference
-  ind_interest <- which(pheno[["day_agg"]] %in% c(cases,controls))
-  ind_case <- which(pheno[["day_agg"]] %in% c(cases))
-  ind_control <- which(pheno[["day_agg"]] %in% c(controls))
-  
+  pheno_cntrl <- pheno[which(pheno$day_agg %in% controls ),]
+  # uncomment this for paired
+  pheno <- pheno[which(pheno$pt_id %in% pheno_case$pt_id &
+                         pheno$pt_id %in% pheno_cntrl$pt_id),]
   # subset
   pheno_cur <- pheno[which(pheno[["day_agg"]] %in% c(cases,controls)),]
+  pheno_cur$day_agg <- factor(pheno_cur$day_agg, levels = c(controls, cases))
   print(table(pheno_cur$day_agg))
   countData <- rounded_counts[,pheno_cur$fullid]
-  
+
   dds_sub <- DESeqDataSetFromMatrix(countData = countData,
                                     colData = pheno_cur,
-                                    design = ~ day_agg + pt_id_fact) #
+                                    design = ~pt_id_fact +day_agg) # pt_id_fact + 
   
   
-  dds_results <- DESeq(dds_sub, parallel = T)
+  dds_results <- DESeq(dds_sub)
   
-  #resultsNames(dds_results)
-  resname <- paste0("day_agg_", cases, "_vs_", controls)
-  rezzy <- results(dds_results, name = resname)
+  resultsNames(dds_results)
+  #resname <- paste0("day_agg_", cases, "_vs_", controls)
+  lenres <- length(resultsNames(dds_results))
+  resname <- resultsNames(dds_results)[lenres]
+  rezzy <- results(dds_results, name = resname, addMLE = F)
   rezzy_2 <- as.data.frame(rezzy@listData)
   rezzy_2$gene <- rezzy@rownames
   rezzy_2$comparsion <- paste0(controls, "_vs_", cases)
+  rezzy_2$resname <- resname
   return(rezzy_2)
 }
 
@@ -134,15 +120,17 @@ FOLD_CHNG_THRESH = .5
 P_VAL_THRESH = 0.05
 SOURCE_EXPR = rounded_counts_expr
 source_name = "pfizer_rna"
-
-comparison_list <- list(c("BL", "Day1"),
-                        c("BL", "Day2"),
-                        c("BL", "Day7"),
-                        c("BL", "Day21"),
-                        c("BL", "Day22.23"),
-                        c("BL", "Day28"))
-
-comparison_list_21 <- list(c("Day21", "Day1.2"),
+# 
+# comparison_list <- list(c("BL", "Day1"),
+#                         c("BL", "Day2"),
+#                         c("BL", "Day7"),
+#                         c("BL", "Day21"),
+#                         c("BL", "Day22.23"),
+#                         c("BL", "Day28"))
+# 
+comparison_list <- list(c("Day21", "BL"),
+                           c("Day21", "Day1"),
+                           c("Day21", "Day2"),
                            c("Day21", "Day7"),
                            c("Day21", "Day22.23"),
                            c("Day21", "Day28"))
@@ -153,5 +141,3 @@ all_comps <- lapply(comparison_list, function(x)
   DeSeqComparisons(x, rounded_counts = SOURCE_EXPR, pheno = pheno_mat))
 
 all_comps_df <- rbindlist(all_comps)
-#saveRDS(file = "/labs/khatrilab/scottmk/aapfizer/data/pfizer_basicDESeq_vsBaseline_v2.rds", all_comps_df)
-
